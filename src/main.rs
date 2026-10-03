@@ -122,7 +122,7 @@ pub fn detect_video_codec(input: &str) -> Result<VideoCodec, Box<dyn Error>> {
 
 fn preflight(input: &str) -> Result<(), ()> {
     println!("[INFO] Checking for codec compability...");
-    let codec_ffprobe = detect_video_codec(&input).map_err(|_| ())?;
+    let codec_ffprobe = detect_video_codec(input).map_err(|_| ())?;
     if ![&VideoCodec::H264, &VideoCodec::Hevc, &VideoCodec::Mpeg4].contains(&&codec_ffprobe) {
         println!("[ERROR] Codec not supported; wait for the maintainer to update.");
         println!(
@@ -161,7 +161,7 @@ fn main() {
     let input_path = args.input.as_str();
     let output_path = args.output.as_str();
 
-    if let Err(_) = preflight(input_path) {
+    if preflight(input_path).is_err() {
         exit(0);
     }
 
@@ -183,7 +183,7 @@ fn main() {
     });
     let temp_path = temp_guard.path().join("ffmpeg-remux.mp4");
 
-    if let Err(err) = core::ffmpeg::ffmpeg_video_remux(FFMPEG_PATH, &input_path, &temp_path) {
+    if let Err(err) = core::ffmpeg::ffmpeg_video_remux(FFMPEG_PATH, input_path, &temp_path) {
         eprintln!("[ERROR] {}", err);
         exit(0);
     };
@@ -363,7 +363,7 @@ fn main() {
     );
     println!("[INFO] output size will be {} bytes", final_len);
 
-    let mut output = File::create(&output_path).unwrap_or_else(|err| {
+    let mut output = File::create(output_path).unwrap_or_else(|err| {
         eprint!("[ERROR] {}", err);
         exit(0)
     });

@@ -479,13 +479,13 @@ pub fn calculate_modifications(
         },
     ];
 
-    if let Some(stts) = info.stts {
-        if stts_delta != 0 {
-            mods.push(Modification {
-                offset: stts.offset,
-                delta: stts_delta,
-            });
-        }
+    if let Some(stts) = info.stts
+        && stts_delta != 0
+    {
+        mods.push(Modification {
+            offset: stts.offset,
+            delta: stts_delta,
+        });
     }
 
     let metadata_growth = mods.iter().try_fold(0u64, |acc, m| {
@@ -696,7 +696,7 @@ pub fn write_modified_offsets(
     fake_payload_offset: u64,
     fake_samples: u32,
 ) -> io::Result<()> {
-    let n = fake_samples as u32;
+    let n = fake_samples;
     let entry_size = if info.offset_is_co64 { 8u64 } else { 4u64 };
     let new_chunk_count = info
         .chunk_count
