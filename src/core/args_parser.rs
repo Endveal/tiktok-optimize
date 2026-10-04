@@ -18,6 +18,7 @@ use std::{env, error::Error};
 pub struct CliArgs {
     pub input: String,
     pub output: String,
+    pub is_cmd: bool,
 }
 
 fn print_usage(program: &str) {
@@ -34,9 +35,10 @@ fn print_version(program: &str) {
 pub fn parse_args() -> Result<Option<CliArgs>, Box<dyn Error>> {
     let argv: Vec<String> = env::args().collect();
 
+    let mut is_cmd = true;
+
     if argv.len() == 1 {
-        print_usage(argv.first().map(String::as_str).unwrap_or("program"));
-        return Ok(None);
+        is_cmd = false;
     }
 
     let program = argv
@@ -77,12 +79,12 @@ pub fn parse_args() -> Result<Option<CliArgs>, Box<dyn Error>> {
     }
 
     if positional.len() != 2 {
-        print_usage(&program);
-        return Ok(None);
+        is_cmd = false;
     }
 
     Ok(Some(CliArgs {
-        input: positional[0].clone(),
-        output: positional[1].clone(),
+        input: positional.first().cloned().unwrap_or_default(),
+        output: positional.get(1).cloned().unwrap_or_default(),
+        is_cmd,
     }))
 }

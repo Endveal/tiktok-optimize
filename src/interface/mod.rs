@@ -13,8 +13,5 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://gnu.org>.
 
-pub mod args_parser;
-pub mod engine;
-pub mod ffmpeg;
-pub mod temp_guard;
-pub mod utils;
+pub mod cli;
+pub mod web;
