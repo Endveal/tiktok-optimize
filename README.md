@@ -59,6 +59,7 @@ Dibuat oleh [**Endveal Entertainment**](https://github.com/Endveal) dan dilisens
 | **Zero-Copy Streaming Rewrite** | Tidak memuat seluruh file ke RAM. Menggunakan `stream_top_level` dengan buffer 1MB untuk rewrite file dengan pertumbuhan metadata yang sudah dikalkulasi sebelumnya. |
 | **Cross-Platform** | Berjalan native di Windows, Linux, dan Android Termux. Satu binary, tanpa runtime tambahan selain FFmpeg. |
 | **Debug Transparency** | Logging terstruktur `[INFO]`, `[DEBUG]`, `[WARN]`, `[ERROR]` untuk setiap tahap kalkulasi offset dan modifikasi. |
+| **API Mode (Placeholder)** | Mode web/API belum diimplementasikan. Menjalankan tanpa argumen akan menampilkan pesan "Mode API Akan Segera Datang...". |
 
 ---
 
@@ -68,11 +69,12 @@ Alur kerja tool ini terdiri dari 6 fase berurutan yang dirancang untuk keamanan 
 
 ```mermaid
 flowchart TD
-    A[Input File] --> B{Preflight Check}
-    B -->|Codec Check via ffprobe| C{Codec H264/HEVC/MPEG4?}
-    C -->|Tidak| Z[Exit: Unsupported Codec]
-    C -->|Ya| D{FFmpeg Tersedia?}
-    D -->|Tidak| Y[Exit: Tampilkan Instruksi Instalasi]
+    A[Input File] --> B{Preflight FFmpeg}
+    B -->|Tidak| Y[Exit: Tampilkan Instruksi Instalasi]
+    B -->|Ya| C{Input Ada & Berbeda?}
+    C -->|Tidak| Z[Exit: Error]
+    C -->|Ya| D{Preflight Codec via ffprobe}
+    D -->|Tidak| W[Exit: Unsupported Codec]
     D -->|Ya| E[FFmpeg Remux ke Temp File]
     E --> F[MP4 Box Parsing]
     F --> G[Analisis Video Track]
@@ -88,14 +90,18 @@ flowchart TD
 ### Fase 1: Preflight dan Validasi
 
 ```
-[INFO] Checking for codec compatibility...
 [INFO] Checking for FFmpeg availability...
 [INFO] FFmpeg found! Processing with the application...
+[INFO] input  : video_asli.mp4
+[INFO] output : video_optimized.mp4
+[INFO] Checking for codec compability...
 ```
 
-- Menjalankan `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name`
-- Memetakan string codec ke enum `VideoCodec::H264 | Hevc | Vp9 | Vp8 | Av1 | Mpeg4 | Mpeg2 | Unknown`
+- Memeriksa ketersediaan FFmpeg via `ffmpeg -version` terlebih dahulu.
 - Validasi path input dan output harus berbeda dan file input harus ada.
+- Menjalankan `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name` untuk deteksi codec.
+- Memetakan string codec ke enum `VideoCodec::H264 | Hevc | Vp9 | Vp8 | Av1 | Mpeg4 | Mpeg2 | Unknown`.
+- Hanya `H264`, `Hevc`, dan `Mpeg4` yang diizinkan melanjutkan proses.
 
 ### Fase 2: FFmpeg Video Remux
 
@@ -151,22 +157,34 @@ Semua fake chunk offset akan menunjuk ke `fake_payload_offset` yang sama. Ini ad
 tiktok-optimize/
 ├── Cargo.toml          # Manifest package, name: tiktok-optimize
 ├── src/
-│   ├── main.rs         # Orchestrator utama, preflight, codec detection, workflow
-│   └── core/
-│       ├── mod.rs      # Module aggregator
-│       ├── cli.rs      # Argument parser minimalis tanpa dependency pihak ketiga
-│       ├── ffmpeg.rs   # Wrapper eksekusi FFmpeg remux
-│       ├── temp_guard.rs # RAII guard untuk temp directory
-│       └── engine.rs   # Core engine: MP4 box parsing & streaming rewrite
+│   ├── main.rs         # Orchestrator utama: entry point, dispatch CLI/API
+│   ├── core/
+│   │   ├── mod.rs      # Module aggregator
+│   │   ├── args_parser.rs # Argument parser minimalis tanpa dependency pihak ketiga
+│   │   ├── ffmpeg.rs   # Wrapper eksekusi FFmpeg remux
+│   │   ├── temp_guard.rs # RAII guard untuk temp directory
+│   │   ├── engine.rs   # Core engine: MP4 box parsing & streaming rewrite
+│   │   └── utils.rs    # Codec detection, FFmpeg preflight, helper umum
+│   └── interface/
+│       ├── mod.rs      # Interface aggregator
+│       ├── cli.rs      # CLI workflow: validasi, preflight codec, proses
+│       └── web.rs      # Placeholder untuk mode API/web (segera hadir)
 ```
 
 ### Tanggung Jawab Modul
 
-**`core::cli`**
+**`core::args_parser`**
 - Parser argumen posisional murni: `<input> <output>`
 - Mendukung `-h | --help` dan `-v | --version`
 - Menangani `--` sebagai end-of-options
 - Zero dependency, menggunakan `std::env::args`
+- Mengembalikan `CliArgs` dengan flag `is_cmd`; jika argumen tidak lengkap, `is_cmd = false` dan input/output diisi string kosong
+
+**`core::utils`**
+- Deteksi codec via `ffprobe` (`detect_video_codec`)
+- Preflight FFmpeg (`preflight_ffmpeg`) dan codec (`preflight_codec`)
+- Enum `VideoCodec` untuk pemetaan codec
+- Helper `exit` dan `print_installation_instructions`
 
 **`core::temp_guard::TempDirGuard`**
 ```rust
@@ -192,6 +210,13 @@ Path format: `{temp_dir}/endveal_{pid}_{secs}_{nanos}`
 - Fungsi utama: `read_box_header`, `find_video_info`, `calculate_modifications`, `stream_top_level`
 - Penanganan overflow dengan `checked_add_u64`
 - Support `stco` 32-bit dan `co64` 64-bit
+
+**`interface::cli`**
+- `run_cli` menjalankan alur lengkap: validasi input, preflight codec, remux FFmpeg, parsing MP4, kalkulasi, streaming rewrite, append fake mdat
+- Hanya dipanggil jika `is_cmd == true`
+
+**`interface::web`**
+- Placeholder untuk mode API/web yang akan datang
 
 ---
 
@@ -289,14 +314,29 @@ tiktok-optimize --help
 #   tiktok-optimize <input> <output>
 ```
 
+### Mode Tanpa Argumen
+
+Jika dijalankan tanpa argumen, tool akan menampilkan pesan bahwa mode API akan segera hadir:
+
+```bash
+$ tiktok-optimize
+[INFO] Checking for FFmpeg availability...
+[INFO] FFmpeg found! Processing with the application...
+[INFO] Mode API Akan Segera Datang...
+[INFO] Tunggu aja commit barunya :)
+```
+
+Catatan: Pengecekan FFmpeg tetap dilakukan meskipun mode API belum tersedia.
+
 ### Contoh Output Log Lengkap
 
 ```
-[INFO] Checking for codec compability...
 [INFO] Checking for FFmpeg availability...
 [INFO] FFmpeg found! Processing with the application...
 [INFO] input  : video_asli.mp4
 [INFO] output : video_optimized.mp4
+[INFO] Checking for codec compability...
+[INFO] Current video Codec: H264
 [DEBUG] -y -hide_banner -loglevel error -i video_asli.mp4 -map 0:v:0 -map 0:a:0? -c copy -map_metadata 0 -movflags +faststart -metadata:s:v:0 handler_name=VideoHandler -metadata:s:a:0 handler_name=SoundHandler /tmp/endveal_1234_.../ffmpeg-remux.mp4
 [INFO] stsz: offset=1234 size=5678 sample_size=0 sample_count=1800
 [INFO] stsc: offset=2345 size=1234 entries=5 last_desc_id=5 chunk_count=10
@@ -402,7 +442,7 @@ Fungsi helper penting:
 
 ### 5. Fake mdat Append
 
-Di akhir proses di `main.rs`:
+Di akhir proses di `interface/cli.rs`:
 
 ```rust
 output.write_all(&16u32.to_be_bytes()) // size = 16
@@ -422,24 +462,33 @@ Semua fake chunk di `stco`/`co64` menunjuk ke offset payload ini. Ukuran 8 byte 
 ├── README.md
 └── src/
     ├── main.rs
-    └── core/
+    ├── core/
+    │   ├── mod.rs
+    │   ├── args_parser.rs
+    │   ├── engine.rs
+    │   ├── ffmpeg.rs
+    │   ├── temp_guard.rs
+    │   └── utils.rs
+    └── interface/
         ├── mod.rs
         ├── cli.rs
-        ├── engine.rs
-        ├── ffmpeg.rs
-        └── temp_guard.rs
+        └── web.rs
 ```
 
 Deskripsi file:
 
 | File | Baris Kode (approx) | Tanggung Jawab |
 | :--- | :--- | :--- |
-| `main.rs` | 450 | Orchestrasi, preflight, workflow utama, final append |
-| `cli.rs` | 88 | Parsing argumen CLI |
-| `ffmpeg.rs` | 70 | Eksekusi FFmpeg remux |
-| `temp_guard.rs` | 60 | RAII temp directory |
-| `engine.rs` | 900 | Parser MP4 dan engine rekayasa sample table |
-| `mod.rs` | 20 | Module declaration |
+| `main.rs` | 35 | Entry point, dispatch CLI/API, preflight FFmpeg |
+| `core/args_parser.rs` | 90 | Parsing argumen CLI |
+| `core/ffmpeg.rs` | 70 | Eksekusi FFmpeg remux |
+| `core/temp_guard.rs` | 60 | RAII temp directory |
+| `core/engine.rs` | 900 | Parser MP4 dan engine rekayasa sample table |
+| `core/utils.rs` | 147 | Codec detection, preflight, helper umum |
+| `core/mod.rs` | 20 | Module declaration |
+| `interface/cli.rs` | 313 | CLI workflow lengkap |
+| `interface/web.rs` | 14 | Placeholder API |
+| `interface/mod.rs` | 17 | Module declaration |
 
 ---
 
@@ -477,6 +526,8 @@ Lalu rebuild: `cargo build --release`
 4.  **Tidak Melakukan Transcode**: Tool ini tidak mengubah resolusi atau framerate secara nyata. Tool ini mengubah metadata sample table agar terbaca sebagai 60fps dengan kepadatan tinggi. Pastikan input Anda sudah 1080p60fps sebelum diproses.
 
 5.  **Kebutuhan Disk**: Membutuhkan ruang disk 2x ukuran file input + pertumbuhan metadata selama proses (karena file temp).
+
+6.  **Mode API Belum Tersedia**: Saat ini hanya mode CLI yang berfungsi. Menjalankan tanpa argumen akan menampilkan pesan placeholder untuk mode API.
 
 ---
 
